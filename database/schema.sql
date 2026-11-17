@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS beneficiaries (
   autorizacion_nombre_archivo TEXT,
   autorizacion_mime_type TEXT,
   autorizacion_archivo BYTEA,
+  pasaporte_nombre_archivo TEXT,
+  pasaporte_mime_type TEXT,
+  pasaporte_archivo BYTEA,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -162,35 +162,6 @@ function CitySelect({ value, country, onChange }) {
   );
 }
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${src}"]`);
-
-    if (existing) {
-      if (existing.dataset.loaded === "true") {
-        resolve();
-        return;
-      }
-
-      existing.addEventListener("load", resolve, { once: true });
-      existing.addEventListener("error", reject, { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-
-    script.onload = () => {
-      script.dataset.loaded = "true";
-      resolve();
-    };
-
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
-
 async function getPassportImage(blob) {
   if (blob.type === "application/pdf") {
     const buffer = await blob.arrayBuffer();
@@ -245,6 +216,20 @@ async function readPassportNumber(blob) {
 }
 
 function AdminPanel({ documento, onClose }) {
+  async function downloadPassport(row) {
+    try {
+      const blob = await (await call(`passport/${row.id}`)).blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = row.pasaporte_nombre_archivo || "pasaporte";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -364,12 +349,16 @@ function AdminPanel({ documento, onClose }) {
                       <td>{row.nombres} {row.apellidos}</td>
                       <td>{row.documento}</td>
                       <td>
-                        {row.pasaporte_url ? (
-                          <a href={row.pasaporte_url} target="_blank" rel="noreferrer">
-                            {row.pasaporte || "Ver"}
+                        {row.pasaporte || "—"}
+                        {row.pasaporte_url && (
+                          <a className="cell-link" href={row.pasaporte_url} target="_blank" rel="noreferrer">
+                            Drive
                           </a>
-                        ) : (
-                          row.pasaporte || "—"
+                        )}
+                        {row.pasaporte_nombre_archivo && (
+                          <button type="button" className="cell-link" onClick={() => downloadPassport(row)}>
+                            Archivo
+                          </button>
                         )}
                       </td>
                       <td>{row.ciudad_residencia || "—"}</td>
@@ -404,33 +393,11 @@ export default function App() {
   const [passportUrl, setPassportUrl] = useState("");
   const [passportName, setPassportName] = useState("");
   const [passportStatus, setPassportStatus] = useState("");
+  const [passportFile, setPassportFile] = useState(null);
 
-  const [googleReady, setGoogleReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-
-    Promise.all([
-      loadScript("https://apis.google.com/js/api.js"),
-      loadScript("https://accounts.google.com/gsi/client"),
-    ])
-      .then(() => {
-        window.gapi.load("picker", () => {
-          if (active) setGoogleReady(true);
-        });
-      })
-      .catch(() => {
-        if (active) {
-          setError("No se pudieron cargar los servicios de Google.");
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const update = (key, value) => {
     setForm((previous) => ({
@@ -486,6 +453,7 @@ export default function App() {
 
       setPassportNumber("");
       setPassportUrl("");
+      setPassportFile(null);
       setPassportName("");
       setUpdatePassport(false);
       setPassportStatus("");
@@ -496,138 +464,35 @@ export default function App() {
     }
   }
 
-  async function choosePassport() {
+  async function choosePassportFile(event) {
+    const selected = event.target.files?.[0];
+    event.target.value = "";
+    if (!selected) return;
+
     setError("");
-    setPassportStatus("");
-
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
-    const appId = import.meta.env.VITE_GOOGLE_APP_ID;
-
-    if (!clientId || !apiKey || !appId) {
-      setError("Faltan las credenciales de Google en el archivo .env.");
+    if (selected.size > 5 * 1024 * 1024) {
+      setError("El archivo del pasaporte no puede pesar más de 5 MB.");
       return;
     }
 
-    if (!googleReady) {
-      setError("El selector de Google Drive todavía está cargando.");
-      return;
-    }
+    setPassportFile(selected);
+    setPassportUrl("");
+    setPassportName(selected.name);
+    setBusy(true);
+    setPassportStatus("Leyendo el documento seleccionado...");
 
     try {
-      const tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: "https://www.googleapis.com/auth/drive.file",
-
-        callback: async (tokenResponse) => {
-          if (tokenResponse.error || !tokenResponse.access_token) {
-            setError("No se pudo autorizar la selección del archivo.");
-            return;
-          }
-
-          try {
-            const picker = new window.google.picker.PickerBuilder()
-              .setAppId(appId)
-              .setDeveloperKey(apiKey)
-              .setOAuthToken(tokenResponse.access_token)
-              .setTitle("Selecciona tu nuevo pasaporte")
-              .addView(
-                new window.google.picker.DocsView()
-                  .setIncludeFolders(false)
-                  .setMimeTypes("application/pdf,image/jpeg,image/png")
-              )
-              .setSelectableMimeTypes(
-                "application/pdf,image/jpeg,image/png"
-              )
-              .setCallback(async (data) => {
-                if (
-                  data.action !== window.google.picker.Action.PICKED
-                ) {
-                  return;
-                }
-
-                const selected = data.docs[0];
-
-                setBusy(true);
-                setPassportStatus("Leyendo el documento seleccionado...");
-
-                try {
-                  const metadataResponse = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${selected.id}?fields=id,name,mimeType,webViewLink`,
-                    {
-                      headers: {
-                        Authorization: `Bearer ${tokenResponse.access_token}`,
-                      },
-                    }
-                  );
-
-                  if (!metadataResponse.ok) {
-                    throw new Error(
-                      "No se pudo obtener la información del archivo."
-                    );
-                  }
-
-                  const metadata = await metadataResponse.json();
-
-                  const downloadResponse = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${selected.id}?alt=media`,
-                    {
-                      headers: {
-                        Authorization: `Bearer ${tokenResponse.access_token}`,
-                      },
-                    }
-                  );
-
-                  if (!downloadResponse.ok) {
-                    throw new Error(
-                      "No se pudo leer el archivo seleccionado."
-                    );
-                  }
-
-                  const blob = await downloadResponse.blob();
-
-                  const extractedNumber = await readPassportNumber(blob);
-
-                  setPassportName(metadata.name || selected.name || "");
-
-                  const driveUrl =
-                    metadata.webViewLink ||
-                    `https://drive.google.com/file/d/${selected.id}/view`;
-
-                  setPassportUrl(driveUrl);
-
-                  if (extractedNumber) {
-                    setPassportNumber(extractedNumber);
-                    setPassportStatus(
-                      "Número detectado. Verifícalo antes de guardar."
-                    );
-                  } else {
-                    setPassportNumber("");
-                    setPassportStatus(
-                      "No se detectó el número. Escríbelo manualmente."
-                    );
-                  }
-                } catch (err) {
-                  setError(
-                    err.message || "No se pudo procesar el pasaporte."
-                  );
-                  setPassportStatus("");
-                } finally {
-                  setBusy(false);
-                }
-              })
-              .build();
-
-            picker.setVisible(true);
-          } catch {
-            setError("No se pudo abrir el selector de Google Drive.");
-          }
-        },
-      });
-
-      tokenClient.requestAccessToken();
+      const extractedNumber = await readPassportNumber(selected);
+      setPassportNumber(extractedNumber || "");
+      setPassportStatus(
+        extractedNumber
+          ? "Número detectado. Verifícalo antes de guardar."
+          : "No se detectó el número. Escríbelo manualmente."
+      );
     } catch {
-      setError("No fue posible iniciar la conexión con Google Drive.");
+      setPassportStatus("No se detectó el número. Escríbelo manualmente.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -641,7 +506,7 @@ export default function App() {
 
     if (
       updatePassport &&
-      (!passportNumber.trim() || !passportUrl.trim())
+      (!passportNumber.trim() || (!passportUrl.trim() && !passportFile))
     ) {
       setError("Selecciona el nuevo pasaporte y verifica su número.");
       return;
@@ -676,6 +541,10 @@ export default function App() {
         ? passportUrl
         : person.pasaporte_url || ""
     );
+
+    if (updatePassport && passportFile) {
+      formData.append("pasaporte_archivo", passportFile);
+    }
 
     if (file) {
       formData.append("autorizacion", file);
@@ -720,6 +589,7 @@ export default function App() {
       setUpdatePassport(false);
       setPassportNumber("");
       setPassportUrl("");
+      setPassportFile(null);
       setPassportName("");
       setPassportStatus("");
       setFile(null);
@@ -862,6 +732,7 @@ export default function App() {
                       setUpdatePassport(true);
                       setPassportNumber("");
                       setPassportUrl("");
+                      setPassportFile(null);
                       setPassportName("");
                       setPassportStatus("");
                     }}
@@ -878,6 +749,7 @@ export default function App() {
                       setUpdatePassport(false);
                       setPassportNumber("");
                       setPassportUrl("");
+                      setPassportFile(null);
                       setPassportName("");
                       setPassportStatus("");
                     }}
@@ -893,28 +765,28 @@ export default function App() {
               <h3>Seleccionar nuevo pasaporte</h3>
 
               <p>
-                Selecciona el documento PDF o imagen que tienes guardado
-                en tu Google Drive.
+                Sube una foto o PDF de tu pasaporte. En el celular también
+                puedes tomar la foto o elegirla desde tu Google Drive.
               </p>
 
-              <button
-                type="button"
-                className="drive-btn"
-                onClick={choosePassport}
-                disabled={busy || !googleReady}
-              >
-                <svg viewBox="0 0 87.3 78" width="20" height="20" aria-hidden="true">
-                  <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
-                  <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
-                  <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
-                  <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
-                  <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
-                  <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+              <div className="upload-options">
+              <label className={`drive-btn device-btn${busy ? " is-disabled" : ""}`}>
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
                 </svg>
-                {busy
-                  ? "Procesando documento..."
-                  : "Seleccionar desde Google Drive"}
-              </button>
+                Subir desde mi dispositivo
+                <input
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/png"
+                  className="visually-hidden"
+                  disabled={busy}
+                  onChange={choosePassportFile}
+                />
+              </label>
+
+              </div>
 
               {passportName && (
                 <div className="file-chip">
@@ -928,6 +800,7 @@ export default function App() {
                     onClick={() => {
                       setPassportName("");
                       setPassportUrl("");
+                      setPassportFile(null);
                       setPassportNumber("");
                       setPassportStatus("");
                     }}

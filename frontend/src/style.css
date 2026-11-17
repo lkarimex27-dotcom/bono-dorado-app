@@ -150,3 +150,13 @@ td{padding:10px 12px;border-bottom:1px solid #f2f4f7;color:var(--ink)}
 tr:last-child td{border-bottom:0}
 td a{color:#1a5fd0;font-weight:600}
 @media(max-width:640px){.stats{grid-template-columns:repeat(2,1fr)}.admin-btn{margin-left:0;width:100%}}
+
+/* subir pasaporte */
+.upload-options{display:flex;flex-wrap:wrap;gap:10px}
+.device-btn{flex-direction:row!important;background:var(--navy)!important;color:#fff!important;border-color:var(--navy)!important}
+.device-btn:hover{background:var(--navy-2)!important}
+.device-btn.is-disabled{opacity:.6;cursor:not-allowed}
+.device-btn:focus-within{box-shadow:var(--focus)}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.cell-link{margin-left:8px;padding:0;border:0;background:none;color:#1a5fd0;font:inherit;font-weight:600;cursor:pointer}
+@media(max-width:640px){.upload-options>*{width:100%}}

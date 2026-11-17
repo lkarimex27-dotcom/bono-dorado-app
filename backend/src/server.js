@@ -108,6 +108,7 @@ const publicFields = `
   tercero_numero_cuenta,
   tercero_banco,
   autorizacion_nombre_archivo,
+  pasaporte_nombre_archivo,
   updated_at
 `;
 
@@ -228,6 +229,7 @@ const REPORT_COLUMNS = [
   ["tercero_numero_cuenta", "Tercero cuenta"],
   ["tercero_banco", "Tercero banco"],
   ["autorizacion_nombre_archivo", "Autorización adjunta"],
+  ["pasaporte_nombre_archivo", "Pasaporte subido desde dispositivo"],
 ];
 
 app.get("/api/admin/updates", adminLimiter, requireAdmin, async (_req, res, next) => {
@@ -280,13 +282,35 @@ app.get("/api/admin/updates.xlsx", adminLimiter, requireAdmin, async (_req, res,
   }
 });
 
+app.get("/api/admin/passport/:id", adminLimiter, requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT pasaporte_nombre_archivo n, pasaporte_mime_type m, pasaporte_archivo f
+       FROM beneficiaries WHERE id = $1`,
+      [Number(req.params.id) || 0]
+    );
+    if (!rows[0]?.f) {
+      return res.status(404).json({ message: "No hay pasaporte subido." });
+    }
+    const name = String(rows[0].n || "pasaporte").replace(/["\\\r\n]/g, "_");
+    res.setHeader("Content-Type", rows[0].m);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(name)}"`);
+    res.send(rows[0].f);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // --------------------------------------------------
 // ACTUALIZAR BENEFICIARIO
 // --------------------------------------------------
 
 app.put(
   "/api/beneficiaries/:id",
-  upload.single("autorizacion"),
+  upload.fields([
+    { name: "autorizacion", maxCount: 1 },
+    { name: "pasaporte_archivo", maxCount: 1 },
+  ]),
   async (req, res, next) => {
     let client;
     let transactionStarted = false;
@@ -303,6 +327,8 @@ app.put(
       }
 
       const b = req.body;
+      const authFile = req.files?.autorizacion?.[0];
+      const passportFile = req.files?.pasaporte_archivo?.[0];
 
       // --------------------------------------------------
       // VALIDAR DATOS DEL PASAPORTE
@@ -373,7 +399,7 @@ app.put(
       // CONSERVAR AUTORIZACIÓN ANTERIOR
       // --------------------------------------------------
 
-      if (yes && !req.file) {
+      if (yes && !authFile) {
         const old = await pool.query(
           `
           SELECT autorizacion_archivo
@@ -422,12 +448,15 @@ app.put(
         yes ? b.tercero_documento : null,
         yes ? b.tercero_numero_cuenta : null,
         yes ? b.tercero_banco : null,
-        req.file?.originalname || null,
-        req.file?.mimetype || null,
-        req.file?.buffer || null,
+        authFile?.originalname || null,
+        authFile?.mimetype || null,
+        authFile?.buffer || null,
         b.cantidad_bonos,
         b.valor_consignado,
         b.lider,
+        passportFile?.originalname || null,
+        passportFile?.mimetype || null,
+        passportFile?.buffer || null,
         id,
       ];
 
@@ -478,9 +507,13 @@ app.put(
           valor_consignado = $25,
           lider = $26,
 
+          pasaporte_nombre_archivo = COALESCE($27, pasaporte_nombre_archivo),
+          pasaporte_mime_type = COALESCE($28, pasaporte_mime_type),
+          pasaporte_archivo = COALESCE($29, pasaporte_archivo),
+
           updated_at = NOW()
 
-        WHERE id = $27
+        WHERE id = $30
         `,
         values
       );
@@ -610,6 +643,14 @@ app.use((error, _req, res, _next) => {
 // --------------------------------------------------
 // INICIAR SERVIDOR
 // --------------------------------------------------
+
+// Columnas del pasaporte subido desde el dispositivo (idempotente).
+await pool.query(`
+  ALTER TABLE beneficiaries
+    ADD COLUMN IF NOT EXISTS pasaporte_nombre_archivo TEXT,
+    ADD COLUMN IF NOT EXISTS pasaporte_mime_type TEXT,
+    ADD COLUMN IF NOT EXISTS pasaporte_archivo BYTEA
+`);
 
 app.listen(PORT, () => {
   console.log(`API lista en puerto ${PORT}`);
