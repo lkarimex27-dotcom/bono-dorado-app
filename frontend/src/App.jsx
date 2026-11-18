@@ -1115,16 +1115,32 @@ export default function App() {
                 </label>
               ))}
 
-              <label>
-                Cuenta para recibir el dinero
-                <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(event) =>
-                    setFile(event.target.files?.[0] || null)
-                  }
-                />
-              </label>
+              {file ? (
+                <div className="file-chip">
+                  <span>
+                    Archivo seleccionado: <strong>{file.name}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    className="remove-btn"
+                    disabled={busy}
+                    onClick={() => setFile(null)}
+                  >
+                    Quitar y elegir otro
+                  </button>
+                </div>
+              ) : (
+                <label>
+                  Cuenta para recibir el dinero
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={(event) =>
+                      setFile(event.target.files?.[0] || null)
+                    }
+                  />
+                </label>
+              )}
 
               <FilePreview file={file} />
 
