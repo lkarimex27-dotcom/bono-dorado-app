@@ -17,7 +17,7 @@ const TEXT = { minLength: 2, maxLength: 120 };
 const ACCOUNT = { pattern: "[0-9]{6,20}", inputMode: "numeric", title: "Solo números, entre 6 y 20 dígitos (sin espacios ni guiones)", digitsOnly: true };
 const ACCOUNT_KEYS = ["cuenta_bancaria", "tercero_numero_cuenta"];
 // Quien no tiene cuenta propia escribe N/A (y luego autoriza a un tercero en el punto 3).
-const ACCOUNT_OR_NA = { ...ACCOUNT, pattern: "[0-9]{6,20}|N/A", inputMode: "text", placeholder: "Número de cuenta o N/A", title: "Solo números (6 a 20 dígitos). Si no tienes cuenta, escribe N/A", allowNA: true };
+const ACCOUNT_OR_NA = { ...ACCOUNT, pattern: "[0-9]{6,20}|N/A", inputMode: "text", placeholder: "Número de cuenta o N/A", title: "Solo números (6 a 20 dígitos). Si no tienes cuenta, escribe N/A", allowNA: true, hint: "Si no tienes cuenta bancaria, escribe N/A" };
 const isNA = (value) => /^\s*n\s*\/?\s*a\s*$/i.test(String(value ?? ""));
 
 // Lo que escribe el usuario: dígitos, o N/A cuando se permite.
@@ -100,7 +100,7 @@ const fields = [
   ["aeropuerto_cercano", "Aeropuerto cercano para viajar", TEXT],
   ["pais_residencia", "País de residencia", NAME],
   ["cuenta_bancaria", "Número de cuenta bancaria", ACCOUNT_OR_NA],
-  ["banco", "Nombre del banco", { ...TEXT, placeholder: "Nombre del banco o N/A" }],
+  ["banco", "Nombre del banco", { ...TEXT, placeholder: "Nombre del banco o N/A", hint: "Si no tienes cuenta bancaria, escribe N/A" }],
   ["tipo_cuenta", "Tipo de cuenta"],
   ["cantidad_bonos", "Cantidad de bonos", { type: "number", min: 1, max: 1000, step: 1 }],
   ["valor_consignado", "Valor consignado", { type: "number", min: 0, step: 1 }],
@@ -881,9 +881,12 @@ export default function App() {
                 </label>
               ) : (
                 <label key={key}>
-                  {label}
+                  <span>
+                    {label}
+                    {rules?.hint && <span className="hint">{rules.hint}</span>}
+                  </span>
                   <input
-                    {...{ ...rules, digitsOnly: undefined, allowNA: undefined }}
+                    {...{ ...rules, digitsOnly: undefined, allowNA: undefined, hint: undefined }}
                     required
                     value={form[key] ?? ""}
                     onChange={(event) => update(key, cleanTyped(event.target.value, rules))}
