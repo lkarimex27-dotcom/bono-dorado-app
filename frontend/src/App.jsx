@@ -1066,7 +1066,7 @@ export default function App() {
             </div>
           )}
 
-          <h2 className="section-title">3. Cuenta para recibir el dinero</h2>
+          <h2 className="section-title">3. SUBIR AUTORIZACIÓN PARA CONSIGNAR A UN TERCERO</h2>
 
           <div className="question">
             <h3>
@@ -1116,7 +1116,7 @@ export default function App() {
               ))}
 
               <label>
-                SUBIR AUTORIZACIÓN PARA CONSIGNAR A UN TERCERO
+                Cuenta para recibir el dinero
                 <input
                   type="file"
                   accept=".pdf,.jpg,.jpeg,.png"
