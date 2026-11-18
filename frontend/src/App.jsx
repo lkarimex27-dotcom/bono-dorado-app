@@ -244,6 +244,34 @@ async function readPassportNumber(blob) {
   }
 }
 
+function FilePreview({ file }) {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    if (!file) return undefined;
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+
+  if (!file || !url) return null;
+
+  return (
+    <div className="file-preview">
+      {file.type === "application/pdf" ? (
+        <>
+          <iframe src={url} title={`Vista previa de ${file.name}`} />
+          <a href={url} target="_blank" rel="noreferrer">
+            Abrir PDF en otra pestaña
+          </a>
+        </>
+      ) : (
+        <img src={url} alt={`Vista previa de ${file.name}`} />
+      )}
+    </div>
+  );
+}
+
 function AdminPanel({ documento, onClose }) {
   async function downloadPassport(row) {
     try {
@@ -980,6 +1008,8 @@ export default function App() {
                 </div>
               )}
 
+              <FilePreview file={passportFile} />
+
               <label>
                 Número del nuevo pasaporte
                 <input
@@ -1069,6 +1099,8 @@ export default function App() {
                   }
                 />
               </label>
+
+              <FilePreview file={file} />
 
               {person.autorizacion_nombre_archivo && !file && (
                 <p>

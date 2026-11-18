@@ -42,9 +42,17 @@ app.use(express.json({ limit: "100kb" }));
 // LÍMITE DE CONSULTAS
 // --------------------------------------------------
 
+// Render está detrás de Cloudflare: req.ip es la IP del proxy, compartida por muchos usuarios.
+// CF-Connecting-IP (que Cloudflare reescribe) trae la IP real de cada dispositivo.
+const clientKey = (req) =>
+  req.get("cf-connecting-ip") ||
+  String(req.get("x-forwarded-for") || "").split(",")[0].trim() ||
+  req.ip;
+
 const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 20,
+  limit: 40,
+  keyGenerator: clientKey,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -185,7 +193,8 @@ const ADMIN_DOCUMENTO = onlyDigits(process.env.ADMIN_DOCUMENTO || "30308544");
 
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 30,
+  limit: 60,
+  keyGenerator: clientKey,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Demasiados intentos. Intenta más tarde." },

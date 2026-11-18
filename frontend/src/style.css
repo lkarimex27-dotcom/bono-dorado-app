@@ -166,3 +166,10 @@ td a{color:#1a5fd0;font-weight:600}
 .copy-row{display:flex;gap:8px}
 .copy-row input{flex:1;min-width:0}
 .copy-row .ghost-btn{display:inline-flex;align-items:center;text-decoration:none;white-space:nowrap}
+
+/* vista previa de archivos */
+.file-preview{display:grid;gap:8px;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.file-preview img{display:block;max-width:100%;max-height:420px;margin:0 auto;border-radius:6px;object-fit:contain}
+.file-preview iframe{width:100%;height:420px;border:0;border-radius:6px;background:#f5f6f8}
+.file-preview a{font-size:13px;font-weight:600;color:#1a5fd0}
+@media(max-width:640px){.file-preview iframe,.file-preview img{max-height:300px;height:300px}}
