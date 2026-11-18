@@ -16,9 +16,25 @@ const NAME = { pattern: "[A-Za-zÁÉÍÓÚÜÑáéíóúüñ' .\\-]{2,60}", titl
 const TEXT = { minLength: 2, maxLength: 120 };
 const ACCOUNT = { pattern: "[0-9]{6,20}", inputMode: "numeric", title: "Solo números, entre 6 y 20 dígitos (sin espacios ni guiones)", digitsOnly: true };
 const ACCOUNT_KEYS = ["cuenta_bancaria", "tercero_numero_cuenta"];
+// Quien no tiene cuenta propia escribe N/A (y luego autoriza a un tercero en el punto 3).
+const ACCOUNT_OR_NA = { ...ACCOUNT, pattern: "[0-9]{6,20}|N/A", inputMode: "text", placeholder: "Número de cuenta o N/A", title: "Solo números (6 a 20 dígitos). Si no tienes cuenta, escribe N/A", allowNA: true };
+const isNA = (value) => /^\s*n\s*\/?\s*a\s*$/i.test(String(value ?? ""));
+
+// Lo que escribe el usuario: dígitos, o N/A cuando se permite.
+const cleanTyped = (value, rules) =>
+  rules?.allowNA && /^n/i.test(value)
+    ? value.toUpperCase().replace(/[^N/A]/g, "").replace(/^NA$/, "N/A").slice(0, 3)
+    : rules?.digitsOnly
+    ? value.replace(/\D/g, "")
+    : value;
+
+// Valores viejos de la BD ("AHORRO", "CUENTA DE AHORROS", "CORRIENTE") a las dos opciones del select.
+const normalizeAccountType = (value, account) =>
+  isNA(account) ? "N/A" : /ahorro/i.test(value) ? "Ahorros" : /corriente/i.test(value) ? "Corriente" : "";
 
 // Datos viejos: "317-822132-81" o "0000 3146 9470" pasan a solo dígitos; "NEQUI" o "N/A" quedan para que el usuario lo corrija.
 const cleanAccount = (value) => {
+  if (isNA(value)) return "N/A";
   const digits = String(value ?? "").replace(/[\s.-]/g, "");
   return /^[0-9]{6,20}$/.test(digits) ? digits : value ?? "";
 };
@@ -83,8 +99,8 @@ const fields = [
   ["ciudad_residencia", "Ciudad y departamento de residencia"],
   ["aeropuerto_cercano", "Aeropuerto cercano para viajar", TEXT],
   ["pais_residencia", "País de residencia", NAME],
-  ["cuenta_bancaria", "Número de cuenta bancaria", ACCOUNT],
-  ["banco", "Nombre del banco", TEXT],
+  ["cuenta_bancaria", "Número de cuenta bancaria", ACCOUNT_OR_NA],
+  ["banco", "Nombre del banco", { ...TEXT, placeholder: "Nombre del banco o N/A" }],
   ["tipo_cuenta", "Tipo de cuenta"],
   ["cantidad_bonos", "Cantidad de bonos", { type: "number", min: 1, max: 1000, step: 1 }],
   ["valor_consignado", "Valor consignado", { type: "number", min: 0, step: 1 }],
@@ -482,10 +498,15 @@ export default function App() {
 
 
   const update = (key, value) => {
-    setForm((previous) => ({
-      ...previous,
-      [key]: value,
-    }));
+    setForm((previous) => {
+      const next = { ...previous, [key]: value };
+      // Sin cuenta bancaria (N/A) el tipo de cuenta no aplica.
+      if (key === "cuenta_bancaria") {
+        if (value === "N/A") next.tipo_cuenta = "N/A";
+        else if (previous.tipo_cuenta === "N/A") next.tipo_cuenta = "";
+      }
+      return next;
+    });
   };
 
   async function search(event) {
@@ -524,6 +545,8 @@ export default function App() {
             key,
             ACCOUNT_KEYS.includes(key)
               ? cleanAccount(data[key])
+              : key === "tipo_cuenta"
+              ? normalizeAccountType(data[key], data.cuenta_bancaria)
               : key === "telefono" && data[key]
               ? (({ code, number }) => `+${code} ${number}`)(splitPhone(data[key]))
               : data[key] ?? "",
@@ -843,13 +866,15 @@ export default function App() {
                   {label}
                   <select
                     required
-                    value={form[key] ?? ""}
+                    disabled={form.cuenta_bancaria === "N/A"}
+                    value={form.cuenta_bancaria === "N/A" ? "" : form[key] ?? ""}
                     onChange={(event) => update(key, event.target.value)}
                   >
-                    <option value="">Selecciona el tipo de cuenta</option>
-                    {!["", "Ahorros", "Corriente"].includes(form[key] ?? "") && (
-                      <option>{form[key]}</option>
-                    )}
+                    <option value="">
+                      {form.cuenta_bancaria === "N/A"
+                        ? "No aplica (sin cuenta bancaria)"
+                        : "Selecciona el tipo de cuenta"}
+                    </option>
                     <option>Ahorros</option>
                     <option>Corriente</option>
                   </select>
@@ -858,12 +883,10 @@ export default function App() {
                 <label key={key}>
                   {label}
                   <input
-                    {...{ ...rules, digitsOnly: undefined }}
+                    {...{ ...rules, digitsOnly: undefined, allowNA: undefined }}
                     required
                     value={form[key] ?? ""}
-                    onChange={(event) =>
-                      update(key, rules?.digitsOnly ? event.target.value.replace(/\D/g, "") : event.target.value)
-                    }
+                    onChange={(event) => update(key, cleanTyped(event.target.value, rules))}
                   />
                 </label>
               )
@@ -1090,7 +1113,7 @@ export default function App() {
               ))}
 
               <label>
-                Adjuntar autorización firmada
+                SUBIR AUTORIZACIÓN PARA CONSIGNAR A UN TERCERO
                 <input
                   type="file"
                   accept=".pdf,.jpg,.jpeg,.png"
