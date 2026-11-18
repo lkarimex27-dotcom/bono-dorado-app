@@ -160,3 +160,4 @@ td a{color:#1a5fd0;font-weight:600}
 .visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .cell-link{margin-left:8px;padding:0;border:0;background:none;color:#1a5fd0;font:inherit;font-weight:600;cursor:pointer}
 @media(max-width:640px){.upload-options>*{width:100%}}
+.upload-options a.drive-btn{text-decoration:none}
