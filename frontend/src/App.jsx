@@ -162,6 +162,35 @@ function CitySelect({ value, country, onChange }) {
   );
 }
 
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+
+    if (existing) {
+      if (existing.dataset.loaded === "true") {
+        resolve();
+        return;
+      }
+
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+
+    script.onload = () => {
+      script.dataset.loaded = "true";
+      resolve();
+    };
+
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
 async function getPassportImage(blob) {
   if (blob.type === "application/pdf") {
     const buffer = await blob.arrayBuffer();
@@ -394,6 +423,31 @@ export default function App() {
   const [passportName, setPassportName] = useState("");
   const [passportStatus, setPassportStatus] = useState("");
   const [passportFile, setPassportFile] = useState(null);
+  const [googleReady, setGoogleReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    Promise.all([
+      loadScript("https://apis.google.com/js/api.js"),
+      loadScript("https://accounts.google.com/gsi/client"),
+    ])
+      .then(() => {
+        window.gapi.load("picker", () => {
+          if (active) setGoogleReady(true);
+        });
+      })
+      .catch(() => {
+        if (active) {
+          setError("No se pudieron cargar los servicios de Google.");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -464,11 +518,14 @@ export default function App() {
     }
   }
 
-  async function choosePassportFile(event) {
+  function choosePassportFile(event) {
     const selected = event.target.files?.[0];
     event.target.value = "";
-    if (!selected) return;
+    if (selected) loadPassportFile(selected);
+  }
 
+  // Archivo del dispositivo o traído de Drive: se guarda en el backend y lee el número.
+  async function loadPassportFile(selected) {
     setError("");
     if (selected.size > 5 * 1024 * 1024) {
       setError("El archivo del pasaporte no puede pesar más de 5 MB.");
@@ -493,6 +550,85 @@ export default function App() {
       setPassportStatus("No se detectó el número. Escríbelo manualmente.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function choosePassport() {
+    setError("");
+    setPassportStatus("");
+
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+    const appId = import.meta.env.VITE_GOOGLE_APP_ID;
+
+    if (!clientId || !apiKey || !appId) {
+      setError("Faltan las credenciales de Google. Usa \"Subir desde mi dispositivo\".");
+      return;
+    }
+
+    if (!googleReady) {
+      setError("Google Drive todavía está cargando. Intenta en unos segundos.");
+      return;
+    }
+
+    try {
+      const tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: "https://www.googleapis.com/auth/drive.file",
+        callback: (tokenResponse) => {
+          if (tokenResponse.error || !tokenResponse.access_token) {
+            setError("No se pudo autorizar Google Drive. Usa \"Subir desde mi dispositivo\".");
+            return;
+          }
+
+          const mimeTypes = "application/pdf,image/jpeg,image/png";
+          const picker = new window.google.picker.PickerBuilder()
+            .setAppId(appId)
+            .setDeveloperKey(apiKey)
+            .setOAuthToken(tokenResponse.access_token)
+            .setTitle("Selecciona tu nuevo pasaporte")
+            .addView(
+              new window.google.picker.DocsView()
+                .setIncludeFolders(true)
+                .setMimeTypes(mimeTypes)
+            )
+            .setSelectableMimeTypes(mimeTypes)
+            .setCallback(async (data) => {
+              if (data.action !== window.google.picker.Action.PICKED) return;
+
+              const selected = data.docs[0];
+              setBusy(true);
+              setPassportStatus("Trayendo el archivo desde Google Drive...");
+
+              try {
+                const response = await fetch(
+                  `https://www.googleapis.com/drive/v3/files/${selected.id}?alt=media`,
+                  { headers: { Authorization: `Bearer ${tokenResponse.access_token}` } }
+                );
+                if (!response.ok) throw new Error();
+                const blob = await response.blob();
+                await loadPassportFile(
+                  new File([blob], selected.name || "pasaporte", {
+                    type: blob.type || selected.mimeType,
+                  })
+                );
+              } catch {
+                setError("No se pudo traer el archivo de Drive. Intenta de nuevo o súbelo desde tu dispositivo.");
+                setPassportStatus("");
+              } finally {
+                // loadPassportFile puede salir antes (archivo > 5 MB) sin liberar el botón.
+                setBusy(false);
+              }
+            })
+            .build();
+
+          picker.setVisible(true);
+        },
+      });
+
+      tokenClient.requestAccessToken();
+    } catch {
+      setError("No fue posible abrir Google Drive. Usa \"Subir desde mi dispositivo\".");
     }
   }
 
@@ -765,8 +901,8 @@ export default function App() {
               <h3>Seleccionar nuevo pasaporte</h3>
 
               <p>
-                Sube una foto o PDF de tu pasaporte desde tu dispositivo, o abre tu
-                Google Drive y pega aquí el enlace del archivo.
+                Sube una foto o PDF de tu pasaporte desde tu dispositivo o
+                elígelo desde tu Google Drive.
               </p>
 
               <div className="upload-options">
@@ -786,11 +922,11 @@ export default function App() {
                 />
               </label>
 
-              <a
+              <button
+                type="button"
                 className="drive-btn"
-                href="https://drive.google.com/drive/my-drive"
-                target="_blank"
-                rel="noreferrer"
+                onClick={choosePassport}
+                disabled={busy || !googleReady}
               >
                 <svg viewBox="0 0 87.3 78" width="20" height="20" aria-hidden="true">
                   <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
@@ -800,31 +936,10 @@ export default function App() {
                   <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
                   <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
                 </svg>
-                Abrir mi Google Drive
-              </a>
+                Elegir desde Google Drive
+              </button>
               </div>
 
-              {!passportFile && (
-                <label>
-                  Enlace del pasaporte en Google Drive
-                  <input
-                    type="url"
-                    value={passportUrl}
-                    disabled={busy}
-                    placeholder="https://drive.google.com/file/d/.../view"
-                    pattern="https://drive\.google\.com/(file/d/[A-Za-z0-9_\-]+/view.*|open\?id=.+)"
-                    title="Pega el enlace de Drive: clic derecho al archivo → Compartir → Copiar enlace"
-                    onChange={(event) => {
-                      setPassportUrl(event.target.value.trim());
-                      setPassportName("");
-                    }}
-                  />
-                  <small>
-                    En Drive: clic derecho al archivo → <strong>Compartir</strong> →
-                    "Cualquier persona con el enlace" → <strong>Copiar enlace</strong>, y pégalo aquí.
-                  </small>
-                </label>
-              )}
 
               {passportName && (
                 <div className="file-chip">
