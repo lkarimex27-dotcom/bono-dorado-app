@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import { pool } from "./db.js";
 import XLSX from "xlsx";
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -23,6 +24,9 @@ const allowedOrigins = (
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+
+// Render pone un proxy delante: así req.protocol es https y el rate limit ve la IP real.
+app.set("trust proxy", 1);
 
 app.use(helmet());
 
@@ -208,7 +212,7 @@ const REPORT_COLUMNS = [
   ["nombres", "Nombres"],
   ["apellidos", "Apellidos"],
   ["pasaporte", "Pasaporte"],
-  ["pasaporte_url", "Enlace pasaporte (Drive)"],
+  ["pasaporte_url", "Enlace pasaporte"],
   ["telefono", "Teléfono"],
   ["correo", "Correo"],
   ["telegram", "Telegram"],
@@ -263,6 +267,12 @@ app.get("/api/admin/updates.xlsx", adminLimiter, requireAdmin, async (_req, res,
     const sheet = XLSX.utils.json_to_sheet(data, {
       header: REPORT_COLUMNS.map(([, label]) => label),
     });
+    // Enlaces clicables: al abrir el Excel, el pasaporte se abre en el navegador.
+    const linkCol = REPORT_COLUMNS.findIndex(([key]) => key === "pasaporte_url");
+    rows.forEach((row, i) => {
+      const cell = sheet[XLSX.utils.encode_cell({ r: i + 1, c: linkCol })];
+      if (cell && row.pasaporte_url) cell.l = { Target: row.pasaporte_url, Tooltip: "Ver pasaporte" };
+    });
     sheet["!cols"] = REPORT_COLUMNS.map(([, label]) => ({ wch: Math.max(14, label.length + 2) }));
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, "Actualizaciones");
@@ -277,6 +287,31 @@ app.get("/api/admin/updates.xlsx", adminLimiter, requireAdmin, async (_req, res,
       `attachment; filename="actualizaciones-bono-dorado-${date}.xlsx"`
     );
     res.send(XLSX.write(book, { type: "buffer", bookType: "xlsx" }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Ver el pasaporte subido (público solo para quien tenga el enlace, como "cualquiera con el enlace" en Drive).
+app.get("/api/passport/:token", async (req, res, next) => {
+  try {
+    if (!/^[a-f0-9]{32}$/.test(req.params.token)) {
+      return res.status(404).json({ message: "Enlace no válido." });
+    }
+    const { rows } = await pool.query(
+      `SELECT pasaporte_nombre_archivo n, pasaporte_mime_type m, pasaporte_archivo f
+       FROM beneficiaries WHERE pasaporte_token = $1`,
+      [req.params.token]
+    );
+    if (!rows[0]?.f) {
+      return res.status(404).json({ message: "No se encontró el pasaporte." });
+    }
+    const name = String(rows[0].n || "pasaporte").replace(/["\\\r\n]/g, "_");
+    // Sin CSP de helmet para que el visor de PDF del navegador funcione.
+    res.removeHeader("Content-Security-Policy");
+    res.setHeader("Content-Type", rows[0].m);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(name)}"`);
+    res.send(rows[0].f);
   } catch (error) {
     next(error);
   }
@@ -338,7 +373,7 @@ app.put(
         b.pasaporte || ""
       ).trim();
 
-      const passportUrl = String(
+      let passportUrl = String(
         b.pasaporte_url || ""
       ).trim();
 
@@ -354,7 +389,12 @@ app.put(
           });
         }
 
+        const ownLink =
+          parsedUrl.host === req.get("host") &&
+          /^\/api\/passport\/[a-f0-9]{32}$/.test(parsedUrl.pathname);
+
         const validDriveLink =
+          ownLink ||
           parsedUrl.protocol === "https:" &&
           parsedUrl.hostname === "drive.google.com" &&
           (
@@ -370,6 +410,12 @@ app.put(
               "El enlace del pasaporte debe corresponder a un archivo de Google Drive.",
           });
         }
+      }
+
+      // Pasaporte subido desde el dispositivo: enlace propio, no adivinable, para abrirlo en el navegador.
+      const passportToken = passportFile ? crypto.randomBytes(16).toString("hex") : null;
+      if (passportToken) {
+        passportUrl = `${req.protocol}://${req.get("host")}/api/passport/${passportToken}`;
       }
 
       // --------------------------------------------------
@@ -457,6 +503,7 @@ app.put(
         passportFile?.originalname || null,
         passportFile?.mimetype || null,
         passportFile?.buffer || null,
+        passportToken,
         id,
       ];
 
@@ -510,10 +557,11 @@ app.put(
           pasaporte_nombre_archivo = COALESCE($27, pasaporte_nombre_archivo),
           pasaporte_mime_type = COALESCE($28, pasaporte_mime_type),
           pasaporte_archivo = COALESCE($29, pasaporte_archivo),
+          pasaporte_token = COALESCE($30, pasaporte_token),
 
           updated_at = NOW()
 
-        WHERE id = $30
+        WHERE id = $31
         `,
         values
       );
@@ -649,7 +697,8 @@ await pool.query(`
   ALTER TABLE beneficiaries
     ADD COLUMN IF NOT EXISTS pasaporte_nombre_archivo TEXT,
     ADD COLUMN IF NOT EXISTS pasaporte_mime_type TEXT,
-    ADD COLUMN IF NOT EXISTS pasaporte_archivo BYTEA
+    ADD COLUMN IF NOT EXISTS pasaporte_archivo BYTEA,
+    ADD COLUMN IF NOT EXISTS pasaporte_token TEXT
 `);
 
 app.listen(PORT, () => {
