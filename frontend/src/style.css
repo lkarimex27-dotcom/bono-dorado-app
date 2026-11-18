@@ -161,3 +161,8 @@ td a{color:#1a5fd0;font-weight:600}
 .cell-link{margin-left:8px;padding:0;border:0;background:none;color:#1a5fd0;font:inherit;font-weight:600;cursor:pointer}
 @media(max-width:640px){.upload-options>*{width:100%}}
 .upload-options a.drive-btn{text-decoration:none}
+
+.passport-link{grid-column:1/-1}
+.copy-row{display:flex;gap:8px}
+.copy-row input{flex:1;min-width:0}
+.copy-row .ghost-btn{display:inline-flex;align-items:center;text-decoration:none;white-space:nowrap}

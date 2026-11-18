@@ -528,7 +528,7 @@ app.put(
           ciudad_residencia = $8,
           aeropuerto_cercano = $9,
           pais_residencia = $10,
-          pasaporte_url = $11,
+          pasaporte_url = COALESCE(NULLIF($11, ''), pasaporte_url),
           cuenta_bancaria = $12,
           banco = $13,
           tipo_cuenta = $14,
@@ -562,6 +562,7 @@ app.put(
           updated_at = NOW()
 
         WHERE id = $31
+        RETURNING pasaporte_url
         `,
         values
       );
@@ -580,6 +581,7 @@ app.put(
 
       res.json({
         message: "Tus datos fueron actualizados correctamente.",
+        pasaporte_url: result.rows[0].pasaporte_url,
       });
     } catch (error) {
       if (client && transactionStarted) {

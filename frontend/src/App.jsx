@@ -715,9 +715,7 @@ export default function App() {
         pasaporte: updatePassport
           ? passportNumber.trim()
           : previous.pasaporte,
-        pasaporte_url: updatePassport
-          ? passportUrl
-          : previous.pasaporte_url,
+        pasaporte_url: data.pasaporte_url ?? previous.pasaporte_url,
         autorizacion_nombre_archivo:
           file?.name || previous.autorizacion_nombre_archivo,
       }));
@@ -854,6 +852,25 @@ export default function App() {
                 placeholder="No hay pasaporte registrado"
               />
             </label>
+
+            {person.pasaporte_url && (
+              <label className="passport-link">
+                Enlace del pasaporte
+                <span className="copy-row">
+                  <input value={person.pasaporte_url} readOnly onFocus={(event) => event.target.select()} />
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => navigator.clipboard?.writeText(person.pasaporte_url)}
+                  >
+                    Copiar
+                  </button>
+                  <a className="ghost-btn" href={person.pasaporte_url} target="_blank" rel="noreferrer">
+                    Abrir
+                  </a>
+                </span>
+              </label>
+            )}
 
             <div className="passport-question">
               <h3>¿Desea actualizar su pasaporte?</h3>
